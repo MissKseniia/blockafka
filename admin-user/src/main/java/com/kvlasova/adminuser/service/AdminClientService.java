@@ -33,6 +33,12 @@ public class AdminClientService {
                         .map(topicName -> new NewTopic(topicName, partitions, replicationFactor))
                         .toList();
 
+                var existingTopics = admin.listTopics().names().get();
+                if (nonNull(existingTopics) && !existingTopics.isEmpty()) {
+                    admin.deleteTopics(existingTopics).all().get();
+                    log.info("Были удалены топики: {}", existingTopics);
+                }
+
                 CreateTopicsResult result = admin.createTopics(newTopics);
                 topics.forEach(topicName -> {
                     try {
@@ -46,6 +52,8 @@ public class AdminClientService {
                             topicsCreated.set(false);
                     }
                 });
+            } catch (ExecutionException | InterruptedException e) {
+                throw new RuntimeException(e);
             }
         }
         return topicsCreated.get();

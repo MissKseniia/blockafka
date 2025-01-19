@@ -33,12 +33,10 @@ import static com.kvlasova.enums.KafkaTopics.TOPIC_USER_INFO;
 public class ProcessMessageService {
 
     private final KafkaProperties kafkaProperties;
-    private MessageSerde messageSerde;
     private AtomicInteger messagesToProcess;
 
     public ProcessMessageService(@Autowired KafkaProperties kafkaProperties) {
         this.kafkaProperties = kafkaProperties;
-        this.messageSerde = new MessageSerde();
         this.messagesToProcess = new AtomicInteger(Users.getUsersLimit());
     }
 
@@ -46,42 +44,8 @@ public class ProcessMessageService {
         return messagesToProcess.get() == 0;
     }
 
-    protected KStream<String, Message> getKafkaStreamFromNewMessages(StreamsBuilder builder) {
-        return builder.stream(TOPIC_NEW_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), messageSerde));
-    }
-
-    //Список должен храниться на диске.
-    protected KTable<String, User> getKafkaTableFromUserInfo(StreamsBuilder builder) {
-        var userSerdes = new UserSerde();
-        return builder.stream(TOPIC_USER_INFO.getTopicName(), Consumed.with(Serdes.String(), userSerdes))
-                .groupByKey()
-                .reduce((userOld, userNew) -> new User(userOld.userName(), updateBlockedUsers(userOld.blockedUsers(), userNew.blockedUsers())))
-                .toStream()
-                .toTable(
-                    Materialized.<String, User>as(Stores.persistentKeyValueStore("user-info-store"))
-                            .withKeySerde(Serdes.String())
-                            .withValueSerde(userSerdes));
-    }
-
-    protected KStream<String, Boolean> getKafkaStreamFromCenzWords(StreamsBuilder builder) {
-        return builder.stream(TOPIC_CENZ_WORDS.getTopicName(), Consumed.with(Serdes.String(), Serdes.Boolean()))
-                .groupByKey()
-                .reduce((toCenzOld, toCenzNew) -> toCenzNew)
-                .toStream()
-                .filter((word, toCenz) -> toCenz);
-    }
-
-    protected KStream<String, Message> getKafkaStreamFromUnBlockingMessages(StreamsBuilder builder) {
-        return builder.stream(TOPIC_UNBLOCKED_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), messageSerde));
-    }
-
     protected StreamsConfig getStreamsConfig() {
         return new StreamsConfig(kafkaProperties.buildStreamsProperties(null));
-    }
-
-    private List<String> updateBlockedUsers(List<String> usersOld, List<String> usersNew) {
-        usersOld.addAll(usersNew);
-        return usersOld.stream().distinct().collect(Collectors.toCollection(ArrayList::new));
     }
 
     public void decreaseMessagesToProcess() {

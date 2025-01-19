@@ -1,6 +1,7 @@
 package com.kvlasova.processmessagecenter.service;
 
 import com.kvlasova.convert.MessageSerde;
+import com.kvlasova.convert.UserSerde;
 import com.kvlasova.model.Message;
 import com.kvlasova.model.User;
 import com.kvlasova.enums.KafkaTopics;
@@ -8,12 +9,19 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Materialized;
+import org.apache.kafka.streams.state.Stores;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import static com.kvlasova.enums.KafkaTopics.TOPIC_NEW_MESSAGES;
+import static com.kvlasova.enums.KafkaTopics.TOPIC_USER_INFO;
 
 @Service
 @Slf4j
@@ -42,7 +50,7 @@ public class BlockMessageService {
         // Создаём KStream из топика с входными данными
         var inputStream = builder.stream(TOPIC_NEW_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), new MessageSerde()));
         //основная логика обработки
-        processMessage(inputStream, builder);
+        processMessage(inputStream, new StreamsBuilder());
         var configs = processMessageService.getStreamsConfig();
         return new KafkaStreams(builder.build(), configs);
     }
@@ -50,10 +58,7 @@ public class BlockMessageService {
     private void processMessage(KStream<String, Message> inputStream, StreamsBuilder builder) {
         KStream<String, Message> joinedStream = inputStream
                 .peek((k,v)->log.info("Got Message: {}",v))
-                .leftJoin(
-                processMessageService.getKafkaTableFromUserInfo(builder),
-                                this::defineStatus
-                            );
+                .leftJoin(getKafkaTableFromUserInfo(builder), this::defineStatus);
         var blockedStream = joinedStream.filter((k, v) -> v.isBlocked());
         var unBlockedStream = joinedStream.filter((k, v) -> !v.isBlocked());
 
@@ -64,6 +69,24 @@ public class BlockMessageService {
         }).to(KafkaTopics.TOPIC_BLOCKED_MESSAGES.getTopicName());
         unBlockedStream.to(KafkaTopics.TOPIC_UNBLOCKED_MESSAGES.getTopicName());
 
+    }
+
+    //Список должен храниться на диске.
+    private KTable<String, User> getKafkaTableFromUserInfo(StreamsBuilder builder) {
+        var userSerdes = new UserSerde();
+        return builder.stream(TOPIC_USER_INFO.getTopicName(), Consumed.with(Serdes.String(), userSerdes))
+                .groupByKey()
+                .reduce((userOld, userNew) -> new User(userOld.userName(), updateBlockedUsers(userOld.blockedUsers(), userNew.blockedUsers())))
+                .toStream()
+                .toTable(
+                        Materialized.<String, User>as(Stores.persistentKeyValueStore("user-info-store"))
+                                .withKeySerde(Serdes.String())
+                                .withValueSerde(userSerdes));
+    }
+
+    private List<String> updateBlockedUsers(List<String> usersOld, List<String> usersNew) {
+        usersOld.addAll(usersNew);
+        return usersOld.stream().distinct().collect(Collectors.toCollection(ArrayList::new));
     }
 
     private Message defineStatus(Message streamValue, User tableValue) {
