@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.Arrays;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.nonNull;
 
@@ -35,8 +36,9 @@ public class AdminClientService {
 
                 var existingTopics = admin.listTopics().names().get();
                 if (nonNull(existingTopics) && !existingTopics.isEmpty()) {
-                    admin.deleteTopics(existingTopics).all().get();
-                    log.info("Были удалены топики: {}", existingTopics);
+                    var customTopics = existingTopics.stream().filter(topics::contains).collect(Collectors.toSet());
+                    admin.deleteTopics(customTopics).all().get();
+                    log.info("Были удалены топики: {}", customTopics);
                 }
 
                 CreateTopicsResult result = admin.createTopics(newTopics);

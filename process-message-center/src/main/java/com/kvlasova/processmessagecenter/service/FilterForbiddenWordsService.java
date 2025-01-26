@@ -4,6 +4,7 @@ import com.kvlasova.convert.MessageSerde;
 import com.kvlasova.model.Message;
 import com.kvlasova.enums.KafkaTopics;
 import com.kvlasova.utils.WordsUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
@@ -21,6 +22,7 @@ import static com.kvlasova.enums.KafkaTopics.TOPIC_CENZ_WORDS;
 import static com.kvlasova.enums.KafkaTopics.TOPIC_UNBLOCKED_MESSAGES;
 
 @Service
+@Slf4j
 public class FilterForbiddenWordsService {
 
     private KafkaStreams kafkaStreamsForCenz;
@@ -65,11 +67,13 @@ public class FilterForbiddenWordsService {
         var messageContent = message.content().split(" ");
         var stream = getStreamForUpdateWords();
         stream.start();
+        log.info("Forbidden words: {}", forbiddenWords);
         var content = Arrays.stream(messageContent)
                 .map(word -> forbiddenWords.stream().anyMatch(word::equalsIgnoreCase)
                                         ? WordsUtils.CENZ_SYMBOLS : word)
                 .collect(Collectors.joining(" "));
         stream.close();
+        log.info("Transformed message: {}", content);
 
         return new Message(content, message.receiver(), message.sender(), message.isBlocked());
     }
@@ -87,9 +91,15 @@ public class FilterForbiddenWordsService {
 
     protected KStream<String, Boolean> getKafkaStreamFromCenzWords(StreamsBuilder builder) {
         return builder.stream(TOPIC_CENZ_WORDS.getTopicName(), Consumed.with(Serdes.String(), Serdes.Boolean()))
+                .peek((k,v) -> log.info("Cenz word Before Filter: {}", k))
                 .groupByKey()
                 .reduce((toCenzOld, toCenzNew) -> toCenzNew)
                 .toStream()
-                .filter((word, toCenz) -> toCenz);
+                .filter((word, toCenz) -> toCenz)
+                .peek((k,v) -> log.info("Cenz word After Filter: {}", k));
     }
 }
+
+//Надо проверить, попадают ли сообщения в топики, из которых потом происходит фильтрация контента.
+//Логов по блокировке больше не было, узнать почему???
+//Прописать путь записи в таблицу)
