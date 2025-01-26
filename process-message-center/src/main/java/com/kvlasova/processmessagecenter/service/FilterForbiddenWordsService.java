@@ -1,6 +1,8 @@
 package com.kvlasova.processmessagecenter.service;
 
+import com.kvlasova.convert.MessageDeserializer;
 import com.kvlasova.convert.MessageSerde;
+import com.kvlasova.convert.MessageSerializer;
 import com.kvlasova.model.Message;
 import com.kvlasova.enums.KafkaTopics;
 import com.kvlasova.utils.WordsUtils;
@@ -8,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
-import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.springframework.stereotype.Service;
@@ -27,7 +28,6 @@ public class FilterForbiddenWordsService {
 
     private KafkaStreams kafkaStreamsForCenz;
     private final ProcessMessageService processMessageService;
-    private Set<String> forbiddenWords;
 
     public FilterForbiddenWordsService(ProcessMessageService processMessageService) {
         this.processMessageService = processMessageService;
@@ -46,10 +46,12 @@ public class FilterForbiddenWordsService {
         // Создание топологии
         StreamsBuilder builder = new StreamsBuilder();
         // Создаём KStream из топика с входными данными
-        var inputStream = builder.stream(TOPIC_UNBLOCKED_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), new MessageSerde()));
-
+        var messagesStream = builder.stream(TOPIC_UNBLOCKED_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), new MessageSerde()));
+        var forbiddenWordsStream = getKafkaStreamFromCenzWords(builder);
+        var wordsSet = new HashSet<String>();
+        forbiddenWordsStream.foreach((k, v) -> wordsSet.add(k));
         //основная логика обработки
-        inputStream.mapValues(this::processMessageContent)
+        messagesStream.mapValues(m -> processMessageContent(m, wordsSet))
                 .peek((k, v) -> {
                     if (k != null) {
                         processMessageService.decreaseMessagesToProcess();
@@ -57,36 +59,21 @@ public class FilterForbiddenWordsService {
                 })
                 .to(KafkaTopics.TOPIC_PROCESSED_MESSAGES.getTopicName());
 
-        var configs = processMessageService.getStreamsConfig();
-        configs.originals().put(StreamsConfig.APPLICATION_ID_CONFIG, "filter-words-service");
+        var configs = processMessageService.getStreamsConfig("filter-words-streams");
 
         return new KafkaStreams(builder.build(), configs);
     }
 
-    private Message processMessageContent(Message message) {
-        var messageContent = message.content().split(" ");
-        var stream = getStreamForUpdateWords();
-        stream.start();
+    private Message processMessageContent(Message message, Set<String> forbiddenWords) {
+        var messageContent = message.getContent().split(" ");
         log.info("Forbidden words: {}", forbiddenWords);
         var content = Arrays.stream(messageContent)
                 .map(word -> forbiddenWords.stream().anyMatch(word::equalsIgnoreCase)
                                         ? WordsUtils.CENZ_SYMBOLS : word)
                 .collect(Collectors.joining(" "));
-        stream.close();
         log.info("Transformed message: {}", content);
 
-        return new Message(content, message.receiver(), message.sender(), message.isBlocked());
-    }
-
-    private KafkaStreams getStreamForUpdateWords() {
-        StreamsBuilder builder = new StreamsBuilder();
-        var wordsToCenz = getKafkaStreamFromCenzWords(builder);
-        var wordsSet = new HashSet<String>();
-        wordsToCenz.foreach((k, v) -> wordsSet.add(k));
-        forbiddenWords = wordsSet;
-        var configs = processMessageService.getStreamsConfig();
-        configs.originals().put(StreamsConfig.APPLICATION_ID_CONFIG, "update-words-service");
-        return new KafkaStreams(builder.build(), configs);
+        return new Message(content, message.getReceiver(), message.getSender(), message.isBlocked());
     }
 
     protected KStream<String, Boolean> getKafkaStreamFromCenzWords(StreamsBuilder builder) {

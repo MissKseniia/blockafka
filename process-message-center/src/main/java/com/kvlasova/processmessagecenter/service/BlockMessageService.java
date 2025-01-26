@@ -1,6 +1,8 @@
 package com.kvlasova.processmessagecenter.service;
 
+import com.kvlasova.convert.MessageDeserializer;
 import com.kvlasova.convert.MessageSerde;
+import com.kvlasova.convert.MessageSerializer;
 import com.kvlasova.convert.UserSerde;
 import com.kvlasova.model.Message;
 import com.kvlasova.model.User;
@@ -13,8 +15,6 @@ import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.KTable;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 
 import static com.kvlasova.enums.KafkaTopics.TOPIC_NEW_MESSAGES;
 import static com.kvlasova.enums.KafkaTopics.TOPIC_USER_INFO;
+import static java.util.Objects.isNull;
 
 @Service
 @Slf4j
@@ -63,7 +64,7 @@ public class BlockMessageService {
         var messagesStream = builder.stream(TOPIC_NEW_MESSAGES.getTopicName(), Consumed.with(Serdes.String(), new MessageSerde()));
         //основная логика обработки
         processMessage(messagesStream);
-        var configs = processMessageService.getStreamsConfig();
+        var configs = processMessageService.getStreamsConfig("block-message-streams");
         return new KafkaStreams(builder.build(), configs);
     }
 
@@ -92,7 +93,13 @@ public class BlockMessageService {
                 .peek((k,v) -> log.info("UserInfoBefore: {} {}", k, v))
                 .groupByKey()
                 //Добавить лог, посмотреть инфу по юзерам после группировки
-                .reduce((userOld, userNew) -> new User(userOld.userName(), updateBlockedUsers(userOld.blockedUsers(), userNew.blockedUsers())))
+                .reduce((userOld, userNew) -> {
+                    log.info("userOld -> {}, userNew -> {}", userOld, userNew);
+                    if (isNull(userOld)) {
+                        return userNew;
+                    }
+                    return new User(userOld.userName(), updateBlockedUsers(userOld.blockedUsers(), userNew.blockedUsers()));
+                })
                 .toStream()
                 //Этот лог вообще не выводится
                 .peek((k,v) -> log.info("UserInfo: {} {}", k, v))
@@ -104,14 +111,16 @@ public class BlockMessageService {
 
     private List<String> updateBlockedUsers(List<String> usersOld, List<String> usersNew) {
         usersOld.addAll(usersNew);
-        return usersOld.stream().distinct().collect(Collectors.toCollection(ArrayList::new));
+        var newList = usersOld.stream().distinct().collect(Collectors.toCollection(ArrayList::new));
+        log.info("New blocked list {}", newList);
+        return newList;
     }
 
     private Message defineStatus(Message streamValue, User tableValue) {
         log.info("defineStatus: Message streamValue {}, User tableValue {}", streamValue, tableValue);
-        var blockedUsers = Optional.ofNullable(tableValue.blockedUsers()).orElse(List.of());
+        var blockedUsers = isNull(tableValue) ? new ArrayList<String>() : Optional.ofNullable(tableValue.blockedUsers()).orElse(List.of());
         var toBlock = blockedUsers.stream()
-                .anyMatch(streamValue.sender()::equalsIgnoreCase);
-        return new Message(streamValue.content(), streamValue.receiver(), streamValue.sender(), toBlock);
+                .anyMatch(streamValue.getSender()::equalsIgnoreCase);
+        return new Message(streamValue.getContent(), streamValue.getReceiver(), streamValue.getSender(), toBlock);
     }
 }

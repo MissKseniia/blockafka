@@ -14,6 +14,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.RecordDeserializationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +27,8 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -33,12 +36,13 @@ import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
 
 @Service
-//@Slf4j
-//@RequiredArgsConstructor
+@Slf4j
+@RequiredArgsConstructor
 public class UserService {
     private final KafkaConsumer<String, Message> userReceiver;
+    private final ExecutorService executor = Executors.newFixedThreadPool(4);;
     private final KafkaProducer<String, Message> userSender;
-    private final KafkaProducer<String, User> userInfoSender;
+    //private final KafkaProducer<String, User> userInfoSender;
     private ConcurrentMap<String, Integer> usersLimits = new ConcurrentHashMap<>();
     private final Random random = new Random();
     private AtomicInteger messagesToRead = new AtomicInteger(0);
@@ -48,27 +52,19 @@ public class UserService {
         messagesToRead.set(usersLimits.values().stream().reduce(0, Integer::sum));
     }
 
-    public UserService(@Autowired KafkaConsumer<String, Message> userReceiver,
-                       @Autowired KafkaProducer<String, Message> userSender,
-                       @Autowired KafkaProducer<String, User> userInfoSender) {
-        this.userReceiver = userReceiver;
-        this.userSender = userSender;
-        this.userInfoSender = userInfoSender;
-    }
-
     public void exchangeMessages() {
-        //пока остались сообщения для отправки или получения
-        while (usersLimits.values().stream().anyMatch(limit -> limit > 0) || messagesToRead.get() > 0) {
-
-            sendMessage();
+        sendMessage();
+        userSender.close();
+        //пока остались сообщения для получения
+        while (messagesToRead.get() > 0) {
 
             ConsumerRecords<String, Message> records = null;
 
             try {
                 records = userReceiver.poll(Duration.ofMillis(20));
             } catch (Exception e) {
-               // log.error("При получении сообщения произошла ошибка: {}", e.getMessage());
-                System.err.println("При получении сообщения произошла ошибка: " + e.getMessage());
+                log.error("При получении сообщения произошла ошибка: {} {}", e.getClass(), e.getMessage());
+                //System.err.println("При получении сообщения произошла ошибка: " + e.getClass(), e.getMessage());
             }
 
             if (isNull(records) || records.isEmpty()) {
@@ -80,39 +76,24 @@ public class UserService {
         }
 
         //Закрываем ресурсы
-        userSender.close();
         userReceiver.close();
-
     }
 
-    //Заменить везде на метод по получению имен пользователей в ютилс
-    public boolean fillUserInfo() {
-        var users = Users.getUsersNames().stream()
-                .map(userName -> new User(userName, UsersUtils.getRandomBlockedUsers(userName)))
-                .toList();
-        users.forEach(this::sendUserInfo);
-//        log.info("---Лимиты по сообщениям и список заблокированных лиц у пользователей:--- \n{}\n\n{}\n"
-//                , usersLimits, users);
-        System.out.printf("---Лимиты по сообщениям и список заблокированных лиц у пользователей:--- \n%s\n%s\n"
-                , usersLimits, users);
-        return true;
-    }
-
-    private void sendUserInfo(User user) {
-        var record = createUserInfoRecord(user);
-        try {
-            var feedback = userInfoSender.send(record);
-            logSending(feedback,
-                    record.value().userName(),
-                    null,
-                    record.value().toString());
-        } catch (Exception e) {
-            logError(record, e);
-        }
-    }
+//    private void sendUserInfo(User user) {
+//        var record = createUserInfoRecord(user);
+//        try {
+//            var feedback = userInfoSender.send(record);
+//            logSending(feedback,
+//                    record.value().userName(),
+//                    null,
+//                    record.value().toString());
+//        } catch (Exception e) {
+//            logError(record, e);
+//        }
+//    }
 
     private void sendMessage() {
-        if (usersLimits.values().stream().anyMatch(limit -> limit > 0)) {
+        while (usersLimits.values().stream().anyMatch(limit -> limit > 0)) {
             var users = usersLimits.keySet().toArray(String[]::new);
             var user = getUser(users);
             //log.info("User - {}", user);
@@ -126,9 +107,9 @@ public class UserService {
                 try {
                     var feedback = userSender.send(message);
                     logSending(feedback,
-                            message.value().sender(),
-                            message.value().receiver(),
-                            message.value().content());
+                            message.value().getSender(),
+                            message.value().getReceiver(),
+                            message.value().getContent());
                 } catch (Exception e) {
                     logError(message, e);
                 }
@@ -169,20 +150,20 @@ public class UserService {
 //            );
             System.out.printf("Время: %s\nПользователем %s от %s получено сообщение: \n%s\n",
                     Instant.now().toString(),
-                    record.value().receiver(),
-                    record.value().sender(),
-                    record.value().content()
+                    record.value().getReceiver(),
+                    record.value().getSender(),
+                    record.value().getContent()
             );
             messagesToRead.getAndAdd(-records.count());
-            if (analyzeMessageContent(record.value().content()) > 2L)
-                updateBlockedUsers(record.value().sender(), record.value().receiver());
+//            if (analyzeMessageContent(record.value().getContent()) > 2L)
+//                updateBlockedUsers(record.value().getSender(), record.value().getReceiver());
 
         }
     }
 
     private void updateBlockedUsers(String sender, String receiver) {
         var user = new User(receiver, List.of(sender));
-        sendUserInfo(user);
+        //sendUserInfo(user);
         System.out.printf("У пользователя %s был обновлен список заблокированных лиц - добавлен пользователь %s.",
                 receiver, sender);
     }

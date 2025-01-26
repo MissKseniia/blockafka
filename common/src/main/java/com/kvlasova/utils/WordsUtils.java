@@ -37,6 +37,6 @@ public class WordsUtils {
     }
 
     private static boolean checkWord(String word, List<String> cenzuredWords) {
-        return isNull(cenzuredWords) || cenzuredWords.isEmpty() || cenzuredWords.stream().anyMatch(word::equalsIgnoreCase);
+        return isNull(cenzuredWords) || cenzuredWords.isEmpty() || cenzuredWords.stream().noneMatch(word::equalsIgnoreCase);
     }
 }

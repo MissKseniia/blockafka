@@ -21,7 +21,9 @@ public class AdminUserAppStartUpRunner implements ApplicationRunner {
                 adminUserService.updateCenzWords();
                 Thread.sleep(30L);
             }
-            adminUserService.closeProducer();
+            adminUserService.closeWordsProducer();
+            adminUserService.fillUserInfo();
+            adminUserService.closeUserInfoProducer();
         }
 
     }

@@ -19,9 +19,6 @@ public class UserAppStartUpRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (userService.fillUserInfo()){
-            userService.exchangeMessages();
-        }
-
+        userService.exchangeMessages();
     }
 }
