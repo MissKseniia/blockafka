@@ -17,12 +17,11 @@ public class AdminUserAppStartUpRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws InterruptedException {
         if (adminClientService.createAllTopics()) {
-            for (int i = 0; i < 2; i++) {
-                adminUserService.updateCenzWords();
-                Thread.sleep(30L);
-            }
-            adminUserService.closeWordsProducer();
             adminUserService.fillUserInfo();
+            adminUserService.updateCenzWords();
+            Thread.sleep(120000L);
+            adminUserService.updateCenzWords();
+            adminUserService.closeWordsProducer();
             adminUserService.closeUserInfoProducer();
         }
 

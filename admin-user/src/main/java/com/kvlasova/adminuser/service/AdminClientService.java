@@ -9,7 +9,6 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.stereotype.Service;
 
-import java.util.Arrays;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -26,6 +25,7 @@ public class AdminClientService {
         var topics = KafkaTopics.getTopicsNames();
         var admin = getAdmin();
         AtomicBoolean topicsCreated = new AtomicBoolean(true);
+
         if (nonNull(admin)) {
             try (admin) {
                 int partitions = 3;
@@ -67,7 +67,6 @@ public class AdminClientService {
             var adminProps = kafkaProperties.buildAdminProperties(null);
             return Admin.create(adminProps);
         } catch (Exception e) {
-            // Логирование ошибки
             log.error("Ошибка при создании Admin: {}", e.getMessage());
             return null;
         }

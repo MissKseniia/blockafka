@@ -12,6 +12,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -30,6 +31,7 @@ public class AdminUserService {
 
         var records1 = createRecords(cenzWords, true);
         var records2 = createRecords(toLiftCenzWords, false);
+
         if (!records1.isEmpty() || !records2.isEmpty()) {
             log.info("Update cenz words: {} Update uncenz words{}\n",
                     records1.stream().map(ProducerRecord::key).toList(),
@@ -58,8 +60,10 @@ public class AdminUserService {
                 .map(userName -> new User(userName, UsersUtils.getRandomBlockedUsers(userName)))
                 .toList();
         users.forEach(this::sendUserInfo);
-        log.info("---Лимиты по сообщениям и список заблокированных лиц у пользователей:--- \n{}}\n{}}\n"
-                , Users.values(), users);
+        log.info("\n---Лимиты по сообщениям и список заблокированных лиц у пользователей:--- \n{}}\n{}}\n",
+                Arrays.stream(Users.values())
+                        .map(user -> String.format("%s: лимит %d", user.getName(), user.getLimit())).toList(),
+                users);
     }
 
     private void sendUserInfo(User user) {
@@ -76,13 +80,9 @@ public class AdminUserService {
         }
     }
 
-    public void closeWordsProducer() {
-        wordsProducer.close();
-    }
+    public void closeWordsProducer() {wordsProducer.close();}
 
-    public void closeUserInfoProducer() {
-        userInfoProducer.close();
-    }
+    public void closeUserInfoProducer() {userInfoProducer.close();}
 
     private List<ProducerRecord<String, Boolean>> createRecords(List<String> cenzWords, boolean toCenz) {
         return cenzWords.stream()
