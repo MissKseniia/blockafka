@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 import static com.kvlasova.enums.KafkaTopics.TOPIC_CENZ_WORDS;
 import static com.kvlasova.enums.KafkaTopics.TOPIC_UNBLOCKED_MESSAGES;
 import static java.util.Objects.nonNull;
+import static org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
 
 @Service
 @Slf4j
@@ -62,7 +63,14 @@ public class FilterForbiddenWordsService {
 
         var configs = processMessageService.getStreamsConfig("filter-words-streams");
 
-        return new KafkaStreams(builder.build(), configs);
+        var kafkaStream = new KafkaStreams(builder.build(), configs);
+        // Устанавливаем обработчик необработанных исключений, чтобы при ошибках поток останавливался корректно.
+        kafkaStream.setUncaughtExceptionHandler(exception -> {
+            log.error("Ошибка при обработке данных в стриме: ", exception);
+            return SHUTDOWN_CLIENT;
+        });
+        return kafkaStream;
+
     }
 
     private Message processMessageContent(Message message, Set<String> forbiddenWords) {

@@ -23,7 +23,6 @@
         <module>user</module>
         <module>process-message-center</module>
         <module>admin-user</module>
-        <module>statistics-center</module>
     </modules>
     <dependencies>
         <dependency>

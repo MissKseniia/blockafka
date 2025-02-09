@@ -27,6 +27,7 @@ import static com.kvlasova.enums.KafkaTopics.TOPIC_NEW_MESSAGES;
 import static com.kvlasova.enums.KafkaTopics.TOPIC_USER_INFO;
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
+import static org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_CLIENT;
 
 @Service
 @Slf4j
@@ -63,7 +64,13 @@ public class BlockMessageService {
         //основная логика обработки
         processMessage(messagesStream);
         var configs = processMessageService.getStreamsConfig("block-message-streams");
-        return new KafkaStreams(builder.build(), configs);
+        var kafkaStream = new KafkaStreams(builder.build(), configs);
+        // Устанавливаем обработчик необработанных исключений, чтобы при ошибках поток останавливался корректно.
+        kafkaStream.setUncaughtExceptionHandler(exception -> {
+           log.error("Ошибка при обработке данных в стриме: ", exception);
+            return SHUTDOWN_CLIENT;
+        });
+        return kafkaStream;
     }
 
     private void processMessage(KStream<String, Message> inputStream) {
